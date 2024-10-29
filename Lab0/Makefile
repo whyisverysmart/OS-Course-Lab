@@ -1,37 +1,18 @@
-LAB := 0
-TIMEOUT := 10
-
-include $(CURDIR)/../Scripts/lab.mk
-
-export LABROOT LABDIR LAB TIMEOUT
+# .PHONY: gdb qemu qemu-gdb clean
+## compile
 
 bomb: student-number.txt
-	@echo "  GEN bomb"
-	@$(CURDIR)/Scripts/generate_bomb.sh
+	./generate_bomb.sh
 
 clean:
-	@echo "  CLEAN bomb"
-	@rm -f bomb
+	rm -f bomb
 
 ## execute bomb
-qemu:
-	@$(QEMU) bomb
+qemu: bomb
+	qemu-aarch64 bomb
 
-qemu-gdb:
-	@$(QEMU) -g 1234 bomb
-
-qemu-grade:
-	@$(QEMU) bomb < ans.txt
+qemu-gdb: bomb
+	qemu-aarch64 -g 1234 bomb
 
 gdb:
-	$(GDB) -ex "set architecture aarch64" -ex "target remote localhost:1234" -ex "add-symbol-file bomb"
-
-grade:
-	@$(DOCKER_RUN) $(GRADER) -t $(TIMEOUT) -f $(CURDIR)/scores.json make qemu-grade
-
-submit:
-	@echo "  SUBMIT lab0"
-	@grep -q '[^[:space:]]' < student-number.txt && echo "  Student number: $(shell cat student-number.txt)" || (echo "  Student number not found" && exit 1)
-	@tar -caf lab$(LAB).tar.gz ans.txt student-number.txt
-
-.PHONY: qemu qemu-grade qemu-gdb gdb grade clean bomb
+	gdb-multiarch -ex "set architecture aarch64" -ex "target remote localhost:1234" -ex "add-symbol-file bomb"
