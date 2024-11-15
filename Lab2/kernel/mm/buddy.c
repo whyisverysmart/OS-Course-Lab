@@ -63,6 +63,7 @@ __maybe_unused static struct page *split_chunk(struct phys_mem_pool *__maybe_unu
 		pool->free_lists[buddy->order].nr_free += 1;
 		list_add(&(buddy->node), &(pool->free_lists[buddy->order].free_list));
 	}
+        BUG_ON(chunk == NULL);
 	return chunk;
         /* BLANK END */
         /* LAB 2 TODO 1 END */
@@ -80,17 +81,40 @@ __maybe_unused static struct page * merge_chunk(struct phys_mem_pool *__maybe_un
          */
         /* BLANK BEGIN */
         struct page *buddy_chunk;
-        if (chunk->order == (BUDDY_MAX_ORDER-1)) return chunk;
 
+        // the chunk has already been the largest one
+        if (chunk->order == (BUDDY_MAX_ORDER - 1)) {
+                return chunk;
+        }
+
+        // locate the buddy_chunk of chunk
         buddy_chunk = get_buddy_chunk(pool, chunk);
-        if (buddy_chunk == NULL || buddy_chunk->allocated == 1 || buddy_chunk->order != chunk->order) return chunk;
-        
+
+        // if the buddy_chunk does not exist, no further merge is required
+        if (buddy_chunk == NULL) {
+                return chunk;
+        }
+
+        if (buddy_chunk->allocated == 1) {
+                return chunk;
+        }
+
+        // the buddy_chunk is not free as a whole, no further merge is required
+        if (buddy_chunk->order != chunk->order) {
+                return chunk;
+        }
+
+        // remove the buddy_chunk from its current free list
         list_del(&(buddy_chunk->node));
         pool->free_lists[buddy_chunk->order].nr_free -= 1;
+
+        // merge the two buddies and get a large chunk
         buddy_chunk->order += 1;
         chunk->order += 1;
-
-        if(chunk > buddy_chunk)chunk=buddy_chunk;
+        if (chunk > buddy_chunk) {
+                chunk = buddy_chunk;
+        }
+        // keep merging
         return merge_chunk(pool, chunk);
         /* BLANK END */
         /* LAB 2 TODO 1 END */
@@ -197,14 +221,16 @@ void buddy_free_pages(struct phys_mem_pool *pool, struct page *page)
          * a suitable free list.
          */
         /* BLANK BEGIN */
-        if (page == NULL || page->allocated == 0) return;
-     	page->allocated = 0;
-	struct page *merged_chunk = merge_chunk(pool, page);
-	merged_chunk->allocated = 0;
-	order = merged_chunk->order;
-	pool->free_lists[order].nr_free += 1;
-	free_list = &(pool->free_lists[order].free_list);
-	list_add(&(merged_chunk->node), free_list);
+        // mark the chunk page as free
+        page->allocated = 0;
+        // merge the freed chunk
+        page = merge_chunk(pool, page);
+
+        // put the merged chunk into its corresponding free list
+        order = page->order;
+        free_list = &(pool->free_lists[order].free_list);
+        list_add(&page->node, free_list);
+        pool->free_lists[order].nr_free += 1;
         /* BLANK END */
         /* LAB 2 TODO 1 END */
 

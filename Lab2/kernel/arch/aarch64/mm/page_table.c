@@ -301,7 +301,7 @@ int query_in_pgtbl(void *pgtbl, vaddr_t va, paddr_t *pa, pte_t **entry)
          */
         /* BLANK BEGIN */
         ptp_t *cur_ptp = (ptp_t *)pgtbl;
-	for(int level = L0;level<=L3;level++) {
+	for(int level = L0; level <= L3; level++) {
                 ptp_t *next_ptp;
                 pte_t *cur_entry;
                 if(get_next_ptp(cur_ptp, level, va, &next_ptp, &cur_entry, false, NULL) == -ENOMAPPING) return -ENOMAPPING;
@@ -331,30 +331,55 @@ static int map_range_in_pgtbl_common(void *pgtbl, vaddr_t va, paddr_t pa,
          * Return 0 on success.
          */
         /* BLANK BEGIN */
-	u64 page_num = len/PAGE_SIZE + (len%PAGE_SIZE > 0);
-	while(page_num > 0){
-		ptp_t *cur_ptp = (ptp_t *)pgtbl;
-		pte_t *pte;
+	s64 total_page_cnt;
+        ptp_t *l0_ptp, *l1_ptp, *l2_ptp, *l3_ptp;
+        pte_t *pte;
+        int ret;
+        int pte_index; // the index of pte in the last level pg
+        int i;
 
-		for(int i = 0; i < 3; i++) get_next_ptp(cur_ptp, i, va, &cur_ptp, &pte, true, NULL);
-		
-		for(int i = GET_L3_INDEX(va); i < PTP_ENTRIES; i++){
-			pte_t new_pte;
-			new_pte.pte = 0;
-			new_pte.l3_page.is_valid = 1;
-			new_pte.l3_page.is_page = 1;
-			new_pte.l3_page.pfn = pa >> PAGE_SHIFT;
-			set_pte_flags(&new_pte, flags, kind);
-			cur_ptp -> ent[i] = new_pte;
-			
-			page_num -= 1;
-			if(page_num == 0) break;
-			
-			va += PAGE_SIZE;
-			pa += PAGE_SIZE;
-		} 
-	
-	}
+        BUG_ON(pgtbl == NULL);
+        BUG_ON(va % PAGE_SIZE);
+        total_page_cnt = len/PAGE_SIZE + (len % PAGE_SIZE > 0);
+        l0_ptp = (ptp_t *)pgtbl;
+        l1_ptp = NULL;
+        l2_ptp = NULL;
+        l3_ptp = NULL;
+
+        while (total_page_cnt > 0) {
+                // l0
+                ret = get_next_ptp(l0_ptp, L0, va, &l1_ptp, &pte, true, rss);
+                BUG_ON(ret != 0);
+
+                // l1
+                ret = get_next_ptp(l1_ptp, L1, va, &l2_ptp, &pte, true, rss);
+                BUG_ON(ret != 0);
+
+                // l2
+                ret = get_next_ptp(l2_ptp, L2, va, &l3_ptp, &pte, true, rss);
+                BUG_ON(ret != 0);
+
+                // l3
+                // get the index of pte
+                pte_index = GET_L3_INDEX(va);
+                for (i = pte_index; i < PTP_ENTRIES; i++) {
+                        pte_t new_pte_val;
+
+                        new_pte_val.pte = 0;
+                        new_pte_val.l3_page.is_valid = 1;
+                        new_pte_val.l3_page.is_page = 1;
+                        new_pte_val.l3_page.pfn = pa >> PAGE_SHIFT;
+                        set_pte_flags(&new_pte_val, flags, kind);
+                        l3_ptp->ent[i].pte = new_pte_val.pte;
+
+                        va += PAGE_SIZE;
+                        pa += PAGE_SIZE;
+                        if (rss) *rss += PAGE_SIZE;
+
+                        total_page_cnt -= 1;
+                        if (total_page_cnt == 0) break;
+                }
+        }
         /* BLANK END */
         /* LAB 2 TODO 4 END */
         dsb(ishst);
@@ -432,45 +457,54 @@ int unmap_range_in_pgtbl(void *pgtbl, vaddr_t va, size_t len,
          * Return 0 on success.
          */
         /* BLANK BEGIN */
-        u64 page_num = len/PAGE_SIZE + (len%PAGE_SIZE > 0);
-	while (page_num > 0) {
-                ptp_t *cur_ptp = (ptp_t *)pgtbl;
-                pte_t *pte;
-                int res;
+        s64 total_page_cnt;
+        ptp_t *l0_ptp, *l1_ptp, *l2_ptp, *l3_ptp, *current_ptp;
+        pte_t *pte;
+        int ret;
+        int pte_index;
+        int i;
+
+        total_page_cnt = len/PAGE_SIZE + (len % PAGE_SIZE > 0);
+	current_ptp = (ptp_t *)pgtbl;
+        l0_ptp = (ptp_t *)pgtbl;
+        l1_ptp = NULL;
+        l2_ptp = NULL;
+        l3_ptp = NULL;
+
+        while(total_page_cnt > 0) {
+                ret = get_next_ptp(l0_ptp, L0, va, &l1_ptp, &pte, false, rss);
+                if (ret == -ENOMAPPING) {
+                        total_page_cnt -= L0_PER_ENTRY_PAGES;
+                        continue;
+                }
+
+                ret = get_next_ptp(l1_ptp, L1, va, &l2_ptp, &pte, false, rss);
+                if (ret == -ENOMAPPING) {
+                        total_page_cnt -= L1_PER_ENTRY_PAGES;
+                        continue;
+                }    
+
+                ret = get_next_ptp(l2_ptp, L2, va, &l3_ptp, &pte, false, rss);
+                if (ret == -ENOMAPPING) {
+                        total_page_cnt -= L2_PER_ENTRY_PAGES;
+                        continue;
+                }
                 
-                /* L0 */
-                res = get_next_ptp(cur_ptp, 0, va, &cur_ptp, &pte, false, NULL);
-                if (res == -ENOMAPPING) {
-                        page_num -= L0_PER_ENTRY_PAGES;
-                        va += L0_PER_ENTRY_PAGES * PAGE_SIZE;
-                        continue;
-                }
+                pte_index = GET_L3_INDEX(va);
+                for(i = pte_index; i < PTP_ENTRIES; i++){
 
-                /* L1 */
-                res = get_next_ptp(cur_ptp, 1, va, &cur_ptp, &pte, false, NULL);
-                if (res == -ENOMAPPING) {
-                        page_num -= L1_PER_ENTRY_PAGES;
-                        va += L1_PER_ENTRY_PAGES * PAGE_SIZE;
-                        continue;
-                }
-
-                /* L2 */
-                res = get_next_ptp(cur_ptp, 2, va, &cur_ptp, &pte, false, NULL);
-                if (res == -ENOMAPPING) {
-                        page_num -= L2_PER_ENTRY_PAGES;
-                        va += L2_PER_ENTRY_PAGES * PAGE_SIZE;
-                        continue;
-                }
-
-                /* L3 */
-                for (int i = GET_L3_INDEX(va); i < PTP_ENTRIES; i++) {
-                        cur_ptp->ent[i].pte = PTE_DESCRIPTOR_INVALID;
-
-                        va += PAGE_SIZE;
-
-                        page_num -= 1;
-                        if (page_num == 0) break;
-                }
+                	l3_ptp->ent[i].pte = PTE_DESCRIPTOR_INVALID;
+                	
+                	va += PAGE_SIZE;
+                	
+                	//if(rss)
+                		//*rss+=PAGE_SIZE;
+        		total_page_cnt -= 1;
+        		if(total_page_cnt == 0)
+        			break;
+                	
+        	}
+		
         }
         /* BLANK END */
         /* LAB 2 TODO 4 END */
@@ -491,22 +525,51 @@ int mprotect_in_pgtbl(void *pgtbl, vaddr_t va, size_t len, vmr_prop_t flags)
          * Return 0 on success.
          */
         /* BLANK BEGIN */
-	u64 page_num = len/PAGE_SIZE + (len%PAGE_SIZE > 0); /* ROUND_UP */
-	while(page_num > 0){
-		ptp_t *cur_ptp = (ptp_t *)pgtbl;
-		pte_t *pte;
-		for(int i = 0; i < 3; i++) get_next_ptp(cur_ptp, i, va, &cur_ptp, &pte, true, NULL);
-		
-		for(int i = GET_L3_INDEX(va); i < PTP_ENTRIES; i++){
-			set_pte_flags(&(cur_ptp -> ent[i]), flags, USER_PTE);
-			
-			va += PAGE_SIZE;
+	s64 total_page_cnt;
+        ptp_t *l0_ptp, *l1_ptp, *l2_ptp, *l3_ptp, *current_ptp;
+        pte_t *pte;
+        int ret;
+        int pte_index;
+        int i;
 
-			page_num -= 1;
-			if(page_num == 0) break;
-		} 
+        total_page_cnt = len/PAGE_SIZE + (len % PAGE_SIZE > 0);
+	current_ptp = (ptp_t *)pgtbl;
+        l0_ptp = (ptp_t *)pgtbl;
+        l1_ptp = NULL;
+        l2_ptp = NULL;
+        l3_ptp = NULL;
 	
-	}
+        while(total_page_cnt > 0){
+                ret = get_next_ptp(l0_ptp, L0, va, &l1_ptp, &pte, false, NULL);
+                if (ret == -ENOMAPPING) {
+                        total_page_cnt -= L0_PER_ENTRY_PAGES;
+                        continue;
+                }
+
+                ret = get_next_ptp(l1_ptp, L1, va, &l2_ptp, &pte, false, NULL);
+                if (ret == -ENOMAPPING) {
+                        total_page_cnt -= L1_PER_ENTRY_PAGES;
+                        continue;
+                }    
+
+                ret = get_next_ptp(l2_ptp, L2, va, &l3_ptp, &pte, false, NULL);
+                if (ret == -ENOMAPPING) {
+                        total_page_cnt -= L2_PER_ENTRY_PAGES;
+                        continue;
+                }
+                
+                pte_index = GET_L3_INDEX(va);
+                for(i = pte_index; i < PTP_ENTRIES; i++) {
+
+                	set_pte_flags(&(l3_ptp->ent[i]), flags, USER_PTE);
+                	va += PAGE_SIZE;
+                        total_page_cnt -= 1;
+                        if (total_page_cnt == 0) {
+                                break;
+                        }	
+        	}
+		
+         }
         /* BLANK END */
         /* LAB 2 TODO 4 END */
         return 0;
