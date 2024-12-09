@@ -49,3 +49,8 @@ book/
 **/index.html
 compile_commands.json
 .cache/
+
+
+Lab*/.vscode
+Lab*/*.png
+Lab*/*.pdf
