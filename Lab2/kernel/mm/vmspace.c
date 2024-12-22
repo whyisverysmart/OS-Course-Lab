@@ -463,7 +463,13 @@ __maybe_unused struct vmregion *find_vmr_for_va(struct vmspace *vmspace,
         /* LAB 2 TODO 6 BEGIN */
         /* Hint: Find the corresponding vmr for @addr in @vmspace */
         /* BLANK BEGIN */
-        return NULL;
+        struct vmregion *vmr;
+        struct rb_node* rb_node;
+        struct rb_root* root;
+        root = &(vmspace->vmr_tree);
+        rb_node = rb_search(root,addr, cmp_vmr_and_va);
+        vmr = rb_entry(rb_node, struct vmregion, tree_node);
+        return vmr;
         /* BLANK END */
         /* LAB 2 TODO 6 END */
 }
