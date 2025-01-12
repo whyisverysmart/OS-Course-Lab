@@ -38,7 +38,7 @@ qemu: build
 	$(Q)$(_QEMU) $(QEMU_OPTS)
 
 qemu-grade:
-	$(Q)$(CHBUILD) clean
+	# $(Q)$(CHBUILD) clean
 	$(MAKE) build
 	$(Q)$(_QEMU) $(QEMU_OPTS)
 
