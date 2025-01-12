@@ -149,12 +149,13 @@ int fsm_mount_fs(const char *path, const char *mount_point)
          * unmount request to the corresponding filesystem. Register an ipc client for each node*/
         
         /* mp_node->_fs_ipc_struct = ipc_register_client(...) */
-
+        mp_node -> _fs_ipc_struct = ipc_register_client(mp_node -> fs_cap);
+        strlcpy(mp_node->path, mount_point, sizeof(mp_node->path));
         /* Increment the fs_num */
-
+        fs_num++;
         /* Set the correct return value */
-
-        UNUSED(mp_node);
+        ret = 0;
+        // UNUSED(mp_node);
 
         pthread_rwlock_unlock(&mount_point_infos_rwlock);
         /* Lab 5 TODO End (Part 1) */
@@ -262,30 +263,38 @@ DEFINE_SERVER_HANDLER(fsm_dispatch)
                  * the fsm_req ipc_msg with mount_id*/
 
                 /* lock the mount_info with rdlock */
-
+                pthread_rwlock_rdlock(&mount_point_infos_rwlock);
                 /* mpinfo = get_mount_point(..., ...) */
-
+                mpinfo = get_mount_point(fsm_req -> path, strlen(fsm_req -> path));
                 /* lock the client_cap_table with mutex */
-
+                pthread_mutex_lock(&fsm_client_cap_table_lock);
                 /* mount_id = fsm_get_client_cap(...) */
-
+                mount_id = fsm_get_client_cap(client_badge, mpinfo -> fs_cap);
                 /* if mount_id is not present, we first register the cap set the
                  * cap and get mount_id */
-
+                if(mount_id == -1) {
+                        mount_id = fsm_set_client_cap(client_badge, mpinfo -> fs_cap);
+                        ret_with_cap = true;
+                        ipc_set_msg_return_cap_num(ipc_msg, 1);
+                        ipc_set_msg_cap(ipc_msg, 0, mpinfo->fs_cap);
+                }
                 /* set the mount_id, mount_path, mount_path_len in the fsm_req
                  */
-
+                fsm_req -> mount_id = mount_id;
+                fsm_req -> mount_path_len = mpinfo -> path_len;
+                strcpy(fsm_req -> mount_path, mpinfo -> path);
                 /* Specifically if we register a new fs_cap in the cap_table, we
                  * should let the caller know with a fsm_req->new_cap_flag and
                  * then return fs_cap (noted above from mount_id) to the
                  * caller*/
-
+                fsm_req -> new_cap_flag = ret_with_cap;
                 /* Before returning to the caller , unlock the client_cap_table
                  * and mount_info_table */
+                pthread_mutex_unlock(&fsm_client_cap_table_lock);
+                pthread_rwlock_unlock(&mount_point_infos_rwlock);
+                // UNUSED(mpinfo);
 
-                UNUSED(mpinfo);
-
-                UNUSED(mount_id);
+                // UNUSED(mount_id);
                 /* Lab 5 TODO End (Part 1) */
                 break;
         }

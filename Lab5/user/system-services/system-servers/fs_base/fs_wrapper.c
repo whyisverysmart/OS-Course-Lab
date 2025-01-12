@@ -113,6 +113,23 @@ void init_fs_wrapper(void)
 int fs_wrapper_get_server_entry(badge_t client_badge, int fd)
 {
         /* Lab 5 TODO Begin (Part 3)*/
+        struct server_entry_node *n;
+        if (fd == AT_FDROOT)
+                return AT_FDROOT;
+
+        if (fd < 0 || fd >= MAX_SERVER_ENTRY_PER_CLIENT)
+                return -1;
+        
+        pthread_spin_lock(&server_entry_mapping_lock);
+        for_each_in_list (n, struct server_entry_node, node, &server_entry_mapping)
+        {
+                if (n->client_badge == client_badge) 
+                {
+                        pthread_spin_unlock(&server_entry_mapping_lock);
+                        return n->fd_to_fid[fd];
+                }
+        }
+        pthread_spin_unlock(&server_entry_mapping_lock);
         return -1;
         /* Lab 5 TODO End (Part 3)*/
 }
@@ -121,7 +138,35 @@ int fs_wrapper_get_server_entry(badge_t client_badge, int fd)
 int fs_wrapper_set_server_entry(badge_t client_badge, int fd, int fid)
 {
         /* Lab 5 TODO Begin (Part 3)*/
-        return 0;
+        struct server_entry_node *private_iter;
+        int ret = 0;
+ 
+        if(fd < 0 || fd >= MAX_SERVER_ENTRY_PER_CLIENT)
+                return -EFAULT;
+        pthread_spin_lock(&server_entry_mapping_lock);
+        for_each_in_list (private_iter,
+                          struct server_entry_node,
+                          node,
+                          &server_entry_mapping) {
+                if (private_iter->client_badge == client_badge) {
+                        private_iter->fd_to_fid[fd] = fid;
+                        pthread_spin_unlock(&server_entry_mapping_lock);
+                        return ret;
+                }
+        }
+
+        struct server_entry_node *n = (struct server_entry_node *)malloc(sizeof(*n));
+        n->client_badge = client_badge;
+
+        for (int i = 0; i < MAX_SERVER_ENTRY_PER_CLIENT; i++)
+                n->fd_to_fid[i] = -1;
+
+        n->fd_to_fid[fd] = fid;
+
+        list_append(&n->node, &server_entry_mapping);
+
+        pthread_spin_unlock(&server_entry_mapping_lock);
+        return ret;
         /* Lab 5 TODO End (Part 3)*/
 }
 
